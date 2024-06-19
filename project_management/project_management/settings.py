@@ -1,7 +1,6 @@
 
 from pathlib import Path
 from datetime import timedelta
-import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -15,8 +14,7 @@ SECRET_KEY = 'django-insecure-#zvwp1zloq=lvrsrtspyh3*%&w&6$4x&#s$%uc1er0uf)1a*m0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
-CSRF_TRUSTED_ORIGINS = ["http://*.on-acorn.io","https://*.on-acorn.io"]
+ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -29,7 +27,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'corsheaders',
+    # 'corsheaders',
     'rest_framework_simplejwt',
     # 'api',
     'authentication',
@@ -109,13 +107,9 @@ WSGI_APPLICATION = 'project_management.wsgi.application'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": os.getenv("MARIADB_DATABASE"),
-        "USER": os.getenv("MARIADB_USER"),
-        "PASSWORD": os.getenv("MARIADB_ROOT_PASSWORD"),
-        "HOST": os.getenv("MARIADB_HOST"),
-        "PORT": os.getenv("MARIADB_PORT", 3306),
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
