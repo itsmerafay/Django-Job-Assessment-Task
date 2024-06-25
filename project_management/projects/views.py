@@ -1,111 +1,72 @@
-# projects/views.py
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Project, ProjectPermission
-from .serializers import ProjectSerializer, ProjectPermissionSerializer
-from .permissions import IsProjectOwner
-from django.http import Http404
-
+from rest_framework.response import Response
 from rest_framework import status
-from django.http import Http404
+from rest_framework.permissions import IsAuthenticated
+from .models import Project, ProjectMembership
+from .serializers import ProjectSerializer, ProjectMembershipSerializer
+from .permissions import IsProjectOwnerOrMember, CanManageUsers
+from django.shortcuts import get_object_or_404
 
-# projects/views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status, permissions
-from .models import Project
-from .serializers import ProjectSerializer
-
-class ProjectPermissionUpdateAPIView(APIView):
+class ProjectListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_project(self, pk):
-        try:
-            return Project.objects.get(pk=pk, is_deleted=False)
-        except Project.DoesNotExist:
-            raise Http404
-
-    def get_object(self, project, user_id):
-        try:
-            return ProjectPermission.objects.filter(project=project, user__id=user_id).first()
-        except ProjectPermission.DoesNotExist:
-            return None
-
-    def put(self, request, pk):
-        project = self.get_project(pk)
-        owner = request.user
-
-        # Check if the request user is the owner of the project
-        if project.owner != owner:
-            return Response({"detail": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
-
-        user_id = request.data.get('user_id')
-        permission_data = {
-            'can_create': request.data.get('can_create', False),
-            'can_read': request.data.get('can_read', False),
-            'can_update': request.data.get('can_update', False),
-            'can_delete': request.data.get('can_delete', False),
-            'can_add_users': request.data.get('can_add_users', False),
-        }
-
-        # Ensure user_id is provided and it's not the owner's id
-        if not user_id or user_id == owner.id:
-            return Response({"detail": "Invalid user id provided."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Retrieve or create ProjectPermission for the specified user
-        project_permission = self.get_object(project, user_id)
-        if not project_permission:
-            # Create new permission record
-            serializer = ProjectPermissionSerializer(data={
-                'project': project.id,
-                'user': user_id,
-                **permission_data
-            })
-        else:
-            # Update existing permission record
-            serializer = ProjectPermissionSerializer(project_permission, data=permission_data, partial=True)
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-
-
-
-
-class ProjectListCreateAPIView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    # List all projects the authenticated user is a member of.
 
     def get(self, request):
-        projects = Project.objects.filter(owner=request.user, is_deleted=False)
+        # memberships__user=request.user helps in querying projects that are associated with memberships where request.user
+        projects = Project.objects.filter(is_deleted=False, memberships__user=request.user) 
         serializer = ProjectSerializer(projects, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        serializer = ProjectSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class ProjectRetrieveUpdateDestroyAPIView(APIView):
-    permission_classes = [IsAuthenticated, IsProjectOwner]
-
-    def get_object(self, pk):
-        try:
-            return Project.objects.get(pk=pk, is_deleted=False)
-        except Project.DoesNotExist:
-            raise Http404
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+            )
     
+    def post(self, request):
+
+        request.data['owner'] = request.user.id
+
+        serializer = ProjectSerializer(data=request.data)
+        if serializer.is_valid():
+            project = serializer.save(owner=request.user)
+            
+            # Automatically adding the creator as the user of the project
+
+            ProjectMembership.objects.create(
+                user=request.user,
+                project=project,
+                can_create=True,
+                can_update=True,
+                can_delete=True,
+                can_manage_users=True
+            )
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+class ProjectDetailView(APIView):
+
+    permission_classes = [IsAuthenticated, IsProjectOwnerOrMember]
+
+    # Specifc project with details
+
+    def get_object(self,pk):
+        return get_object_or_404(Project, pk=pk , is_deleted=False)
+
+    # by default accept pk for Project because of above get_object
     def get(self, request, pk):
         project = self.get_object(pk)
+        # this check object permissions iterate over all the permissions class defined above.
         self.check_object_permissions(request, project)
         serializer = ProjectSerializer(project)
-        return Response(serializer.data)
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+        )
     
     def put(self, request, pk):
         project = self.get_object(pk)
@@ -113,12 +74,40 @@ class ProjectRetrieveUpdateDestroyAPIView(APIView):
         serializer = ProjectSerializer(project, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response(serializer.data)  # Return the updated data
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
     
     def delete(self, request, pk):
         project = self.get_object(pk)
         self.check_object_permissions(request, project)
-        project.is_deleted = True  # Soft delete logic
+        project.is_deleted = True
         project.save()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            'Successfully deleted !!',
+            status=status.HTTP_200_OK
+        )
+    
+
+class AddProjectMemberView(APIView):
+    permission_classes = [IsAuthenticated, CanManageUsers]
+    def post(self, request, pk):
+        project = get_object_or_404(Project, pk=pk, is_deleted=False)
+        serializer = ProjectMembershipSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(project=project)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        project = get_object_or_404(Project, pk=pk, is_deleted=False)
+        self.check_object_permissions(request, project)
+        
+        user_id = request.data.get('user_id')  
+        
+        try:
+            membership = ProjectMembership.objects.get(project=project, user_id=user_id)
+            membership.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProjectMembership.DoesNotExist:
+            return Response({"error": "Membership not found"}, status=status.HTTP_404_NOT_FOUND)

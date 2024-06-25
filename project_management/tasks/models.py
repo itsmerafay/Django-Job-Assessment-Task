@@ -1,25 +1,24 @@
-from django.apps import apps
 from django.db import models
+from django.conf import settings
+from projects.models import Project
 
 class Task(models.Model):
+    PENDING = 'Pending'
+    IN_PROGRESS = 'In Progress'
+    COMPLETE = 'Complete'
+
     STATUS_CHOICES = [
-        ('PENDING', 'Pending'),
-        ('IN_PROGRESS', 'In Progress'),
-        ('COMPLETED', 'Completed'),
+        (PENDING, 'Pending'),
+        (IN_PROGRESS, 'In Progress'),
+        (COMPLETE, 'Complete'),
     ]
-    
+
+    project = models.ForeignKey(Project, related_name='tasks', on_delete=models.CASCADE)
     title = models.CharField(max_length=255)
     description = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default=PENDING)
     due_date = models.DateField()
-    project = models.ForeignKey('projects.Project', related_name='tasks', on_delete=models.CASCADE)
+    assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='tasks', on_delete=models.SET_NULL, null=True)
+    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_deleted = models.BooleanField(default=False)
-
-    def __str__(self):
-        return self.title
-
-    def delete(self, *args, **kwargs):
-        self.is_deleted = True
-        self.save()
